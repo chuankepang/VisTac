@@ -36,28 +36,53 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-add_executable(rokae_joint
-  src/rokae_joint.cpp
+add_executable(rokae_joint_rt
+  src/rokae_joint_rt.cpp
 )
 
-target_link_libraries(rokae_joint
+target_link_libraries(rokae_joint_rt
   Rokae::Rokae
   Eigen3::Eigen
 )
 
 
-target_include_directories(rokae_joint PRIVATE
+target_include_directories(rokae_joint_rt PRIVATE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
 
-ament_target_dependencies(rokae_joint
+ament_target_dependencies(rokae_joint_rt
   rclcpp
   std_msgs
 )
 
 install(TARGETS
-  rokae_joint
+  rokae_joint_rt
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(rokae_cart_rt
+  src/rokae_cart_rt.cpp
+)
+
+target_link_libraries(rokae_cart_rt
+  Rokae::Rokae
+  Eigen3::Eigen
+)
+
+
+target_include_directories(rokae_cart_rt PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(rokae_cart_rt
+  rclcpp
+  std_msgs
+)
+
+install(TARGETS
+  rokae_cart_rt
   DESTINATION lib/${PROJECT_NAME}
 )
 

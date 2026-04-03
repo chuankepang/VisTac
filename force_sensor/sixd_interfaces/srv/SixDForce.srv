@@ -1,0 +1,7 @@
+# send flag
+bool obtain_force
+
+---
+
+# receive force
+float32[] six_d_force

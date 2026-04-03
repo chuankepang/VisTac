@@ -285,7 +285,7 @@ private:
                                 std::cout << value << " ";
                             }
                             std::cout << std::endl;
-                            motion_controller_->MoveJ(0.5, cur_pos, target_pos);
+                            motion_controller_->MoveJ(0.5,cur_pos,target_pos);
 
                             {
                                 std::lock_guard<std::mutex> lock(joint_positions_mutex_);
