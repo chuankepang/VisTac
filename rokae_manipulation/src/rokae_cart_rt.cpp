@@ -72,7 +72,7 @@ public:
         {
             RCLCPP_INFO(this->get_logger(), "Initializing robot joint positions to zero.");
             motion_controller_ = robot_.getRtMotionController().lock();
-            robot_.startReceiveRobotState(std::chrono::milliseconds(1),{RtSupportedFields::jointPos_m});
+            robot_.startReceiveRobotState(std::chrono::milliseconds(1),{RtSupportedFields::jointPos_m, RtSupportedFields::tcpPose_m});
 
             std::array<double, 7> cur_pos {};
             robot_.getStateData(RtSupportedFields::jointPos_m, cur_pos);
@@ -319,11 +319,11 @@ private:
 
                             std::array<double, 16> cur_pos {};
                             robot_.getStateData(RtSupportedFields::tcpPose_m, cur_pos);
-                            std::cout << "Current target positions: ";
+                            std::cout << "Current positions: ";
                             for (double value : cur_pos) {
                                 std::cout << value << " ";
                             }
-                            rokae::CartesianPosition start_cmd(cur_pos);
+                            // rokae::CartesianPosition start_cmd(cur_pos);
 
                             std::array<double, 16> target_pos {};
                             {
@@ -331,11 +331,19 @@ private:
                                 target_pos = cart_queue_.empty() ? cur_pos : cart_queue_.front();
                                 cart_queue_.clear();
                             }
-
+                            std::cout << "Target positions: ";
                             for (double value : target_pos) {
                                 std::cout << value << " ";
                             }
-                            rokae::CartesianPosition target_cmd(target_pos);
+                            // rokae::CartesianPosition target_cmd(target_pos);
+
+                            // 3. 创建 CartesianPosition 对象（关键修复）
+                            rokae::CartesianPosition start_cmd;
+                            rokae::CartesianPosition target_cmd;
+                            
+                            // 方法1：直接赋值 pos 数组（推荐，避免构造函数 bug）
+                            start_cmd.pos = cur_pos;
+                            target_cmd.pos = target_pos;
 
                             std::cout << std::endl;
                             motion_controller_->MoveL(0.5, start_cmd, target_cmd);
@@ -405,7 +413,7 @@ private:
 
     // rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr filted_joints;
     
-    const std::array<double, 7> zero_pos = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    const std::array<double, 7> zero_pos = {0, M_PI/6, 0, M_PI/3, 0, M_PI/2, 0};
     //线程共享数据
     std::mutex cart_positions_mutex_;
     std::deque<std::array<double,16>> cart_queue_;  // 16个元素（4x4齐次变换矩阵）
