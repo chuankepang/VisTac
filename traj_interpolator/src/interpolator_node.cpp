@@ -57,6 +57,8 @@ private:
             current_pos_ = target_pos_;
         }
 
+        RCLCPP_INFO(this->get_logger(), "[%.3f]", current_pos_.x());
+
         // 旋转插值 (Slerp)
         double angle = current_quat_.angularDistance(target_quat_);
         if (angle > max_angular_step_) {
@@ -93,8 +95,8 @@ private:
     Eigen::Quaterniond current_quat_, target_quat_;
     bool initialized_ = false;
 
-    const double max_linear_step_ = 0.0004; 
-    const double max_angular_step_ = 0.002; 
+    const double max_linear_step_ = 0.0004; // (0.4mm / 2ms) $\rightarrow$ 最大线速度约为 0.2 m/s。
+    const double max_angular_step_ = 0.002; // (0.002 rad / 2ms) $\rightarrow$ 最大角速度约为 57.3°/s
 };
 
 int main(int argc, char** argv) {
