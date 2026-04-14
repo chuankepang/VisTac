@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             "inspire_teleop = inspire_hand.inspire_sub:main",
+            "inspire_hand_controller = inspire_hand.inspire_hand_controller:main",
         ],
     },
 )

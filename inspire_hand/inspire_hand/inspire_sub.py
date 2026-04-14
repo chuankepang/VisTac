@@ -20,7 +20,7 @@ class InspireSub(Node):
             10)
         self.pub_hand_states_ = self.create_publisher(
             Stampint32array, 'hand_states', 10)
-        self.port = '/dev/ttyUSB1'
+        self.port = '/dev/ttyUSB0'
         self.baudrate = 115200
         self.joints = {
                         "Thu_MCP": 0,"Thu_IP": 1,
@@ -43,6 +43,7 @@ class InspireSub(Node):
         self.ser = self.inspire_init()
         self.inspire_ready:bool = False
         self.disp_force:bool = False
+        self.disp_angle:bool = False
         self.listener = keyboard.Listener(on_press=self.on_press)
         self.listener.start()
 
@@ -61,6 +62,8 @@ class InspireSub(Node):
             self.get_logger().info(f'force: {force}')
         if self.inspire_ready:
             self.inspire_set_angle(self.ser,1,write_data)
+        if self.disp_angle:
+            self.get_logger().info(f'angle: {write_data}')
 
 
     def openSerial(self,port,baudrate):
@@ -138,12 +141,14 @@ class InspireSub(Node):
     
     def inspire_read_force(self,ser,id):
         force = read_data_6(ser,id,'forceAct')
+        if force is None:
+            return [0,0,0,0,0,0]
         force = [(f - 65536) if f > 10000 else f for f in force]
         return force
         
     def on_press(self,key):
         try:
-            if key.char == 'q':
+            if key == keyboard.Key.f12:
                 rclpy.shutdown()  # Stop listener
             elif key.char == '1':
                 self.low_force = not self.low_force
@@ -153,9 +158,11 @@ class InspireSub(Node):
                 else:
                     self.inspire_set_force(self.ser,1,self.force_threshold)
                     self.get_logger().info(f"force theshold set to {self.force_threshold}")
-            elif key.char == '2':
+            elif key.char == '0':
                 self.disp_force = not self.disp_force
-            elif key.char == 'c':
+            elif key.char == '9':
+                self.disp_angle = not self.disp_angle
+            elif key.char == 'm':
                 self.inspire_ready = not self.inspire_ready
         except AttributeError:
             pass
@@ -165,5 +172,10 @@ class InspireSub(Node):
 def main(args = None):
     rclpy.init(args=args) 
     node = InspireSub()  
-    rclpy.spin(node) 
-    rclpy.shutdown() 
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass  
+    finally:
+        node.destroy_node()
+        rclpy.shutdown() 

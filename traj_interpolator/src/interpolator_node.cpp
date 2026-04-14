@@ -8,6 +8,9 @@
 #include <algorithm>
 #include <chrono>
 
+// ros2 topic pub -r 10 /cmd_pose_vision std_msgs/msg/Float32MultiArray "{data: [1,0,0,0.2, 0,1,0,0, 0,0,1,0, 0,0,0,1]}"
+// ros2 topic pub --once /interpolation_mode std_msgs/msg/Int32 "{data: 1}"
+
 // 定义数据源枚举，用于状态机控制
 enum class CommandSource {
     IDLE = 0,         // 静止模式（不接收任何新指令，保持当前位姿）
