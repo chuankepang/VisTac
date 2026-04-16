@@ -111,6 +111,19 @@ public:
             
             motion_controller_->MoveJ(0.5, cur_pos, zero_pos);
             RCLCPP_INFO(this->get_logger(), "Robot joint positions initialized to zero.");
+
+            // --- 新增代码：打印 zero_pos 对应的笛卡尔矩阵 ---
+            std::array<double, 16> zero_cart_pos{};
+            robot_.getStateData(RtSupportedFields::tcpPose_m, zero_cart_pos); 
+
+            printf("\n[Zero Position Cartesian Matrix (4x4 Row-Major)]:\n");
+            for (int i = 0; i < 4; i++) {
+                printf("  [ %8.4f, %8.4f, %8.4f, %8.4f ]\n", 
+                    zero_cart_pos[i*4], zero_cart_pos[i*4+1], zero_cart_pos[i*4+2], zero_cart_pos[i*4+3]);
+            }
+            printf("\n");
+            // ------------------------------------------
+
         }
         catch(std::exception &e)
         {
