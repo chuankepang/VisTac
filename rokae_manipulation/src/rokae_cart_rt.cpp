@@ -50,8 +50,8 @@ public:
         // .reliability(rclcpp::ReliabilityPolicy::BestEffort)
         // .durability(rclcpp::DurabilityPolicy::Volatile)
         .reliability(rmw_qos_reliability_policy_t::RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT)
-        .durability(rmw_qos_durability_policy_t::RMW_QOS_POLICY_DURABILITY_VOLATILE)
-        .deadline(rclcpp::Duration(1ms));
+        .durability(rmw_qos_durability_policy_t::RMW_QOS_POLICY_DURABILITY_VOLATILE);
+        // .deadline(rclcpp::Duration(1ms));
 
         // joint_positions_sub_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
         //     "sent_joints", qos, 
@@ -108,6 +108,16 @@ public:
             }
             std::cout << "Robot power state: " << state_str << std::endl;
             
+            // --- 新增代码：打印 zero_pos 对应的笛卡尔矩阵 ---
+            std::array<double, 16> cur_cart_pos{};
+            robot_.getStateData(RtSupportedFields::tcpPose_m, cur_cart_pos); 
+
+            printf("\n[Zero Position Cartesian Matrix (4x4 Row-Major)]:\n");
+            for (int i = 0; i < 4; i++) {
+                printf("  [ %8.4f, %8.4f, %8.4f, %8.4f ]\n", 
+                    cur_cart_pos[i*4], cur_cart_pos[i*4+1], cur_cart_pos[i*4+2], cur_cart_pos[i*4+3]);
+            }
+            printf("\n");
             
             motion_controller_->MoveJ(0.5, cur_pos, zero_pos);
             RCLCPP_INFO(this->get_logger(), "Robot joint positions initialized to zero.");
@@ -255,8 +265,19 @@ private:
     {
         bool is_ready_to_move = false;
         std::array<double, 16> current_target_cart_pos_ {};
+        std::array<double, 16> last_target_cart_pos_;
         {
             std::lock_guard<std::mutex> lock(cart_positions_mutex_);
+            // if(!cart_queue_.empty()) 
+            // {
+            //     last_target_cart_pos_ = cart_queue_.front();
+            //     cart_queue_.pop_front();
+            // }
+            // //   constexpr const char *tcpPose_m  = "pos_m"; ///< 末端位姿, 相对于基坐标系, 行优先齐次变换矩阵 - Array16D
+            // else
+            // {
+            //     cmd.pos = last_target_cart_pos_;
+            // }
             if(!cart_queue_.empty()) 
             {
                 current_target_cart_pos_ = cart_queue_.front();
@@ -342,7 +363,7 @@ private:
                             {
                                 std::lock_guard<std::mutex> lock(cart_positions_mutex_);
                                 target_pos = cart_queue_.empty() ? cur_pos : cart_queue_.front();
-                                cart_queue_.clear();
+                                // cart_queue_.clear();
                             }
                             std::cout << "Target positions: ";
                             for (double value : target_pos) {
@@ -359,7 +380,7 @@ private:
                             target_cmd.pos = target_pos;
 
                             std::cout << std::endl;
-                            motion_controller_->MoveL(0.5, start_cmd, target_cmd);
+                            // motion_controller_->MoveL(0.5, start_cmd, target_cmd);
 
                             {
                                 std::lock_guard<std::mutex> lock(cart_positions_mutex_);
@@ -431,6 +452,8 @@ private:
     std::mutex cart_positions_mutex_;
     std::deque<std::array<double,16>> cart_queue_;  // 16个元素（4x4齐次变换矩阵）
     const size_t max_queue_size_ = 100; // 定长队列大小
+
+    std::array<double, 16> last_valid_cart_pos_;
 
 
     bool init_joint_pos_set_ = false;
