@@ -19,8 +19,8 @@ class CartTrajectoryPublisher(Node):
         
         # 基础平移 (基于你日志里的起点)
         base_x = 0.5635
-        base_y = 0.0
-        base_z = 0.4315  
+        base_y = 0.0000
+        base_z = 0.4314  
         
         # 在 Z 轴上叠加一个振幅为 5cm (0.05m) 的正弦波
         # math.sin(self.time_elapsed) 频率大约为 0.16 Hz
@@ -36,7 +36,7 @@ class CartTrajectoryPublisher(Node):
         ]
         
         self.publisher_.publish(msg)
-        self.time_elapsed += 0.01  # 每次增加 0.01 秒
+        self.time_elapsed += 0.001  # 每次增加 0.01 秒
 
 def main(args=None):
     rclpy.init(args=args)

@@ -45,12 +45,17 @@ public:
         robot_.setPowerState(true,ec);
         
         //订阅节点 设置通信节点接受情况
-        auto qos = rclcpp::QoS(rclcpp::KeepLast(10))
+        auto qos = rclcpp::QoS(rclcpp::KeepLast(10));
+        // 1. 改变可靠性：BestEffort 通常用于实时控制，但如果发送端是 Reliable，
+        //    最好也改成 Reliable 以确保在调试时能对齐。
+        qos.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
+        // 2. 改变耐久性：改为 Volatile 即可
+        qos.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
         // 错误
         // .reliability(rclcpp::ReliabilityPolicy::BestEffort)
         // .durability(rclcpp::DurabilityPolicy::Volatile)
-        .reliability(rmw_qos_reliability_policy_t::RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT)
-        .durability(rmw_qos_durability_policy_t::RMW_QOS_POLICY_DURABILITY_VOLATILE);
+        // .reliability(rmw_qos_reliability_policy_t::RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT)
+        // .durability(rmw_qos_durability_policy_t::RMW_QOS_POLICY_DURABILITY_VOLATILE)
         // .deadline(rclcpp::Duration(1ms));
 
         // joint_positions_sub_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
@@ -261,57 +266,109 @@ private:
     }
     
 
+    // CartesianPosition rokae_callback()
+    // {
+    //     bool is_ready_to_move = false;
+    //     std::array<double, 16> current_target_cart_pos_ {};
+    //     std::array<double, 16> last_target_cart_pos_;
+    //     {
+    //         std::lock_guard<std::mutex> lock(cart_positions_mutex_);
+    //         // if(!cart_queue_.empty()) 
+    //         // {
+    //         //     last_target_cart_pos_ = cart_queue_.front();
+    //         //     cart_queue_.pop_front();
+    //         // }
+    //         // //   constexpr const char *tcpPose_m  = "pos_m"; ///< 末端位姿, 相对于基坐标系, 行优先齐次变换矩阵 - Array16D
+    //         // else
+    //         // {
+    //         //     cmd.pos = last_target_cart_pos_;
+    //         // }
+    //         if(!cart_queue_.empty()) 
+    //         {
+    //             current_target_cart_pos_ = cart_queue_.front();
+    //             cart_queue_.pop_front();
+    //         }
+    //         //   constexpr const char *tcpPose_m  = "pos_m"; ///< 末端位姿, 相对于基坐标系, 行优先齐次变换矩阵 - Array16D
+    //         else
+    //         {
+    //             robot_.getStateData(RtSupportedFields::tcpPose_m, current_target_cart_pos_);
+    //         }
+
+    //         if(!init_cart_pos_set_ && init_move_completed) 
+    //         {
+    //             init_cart_pos_set_ = true;
+    //         }
+    //         is_ready_to_move = init_cart_pos_set_ ;
+    //     }
+
+    //     CartesianPosition cmd;
+
+    //     // std::cout << init_joint_pos_set_<< std::endl;
+    //     if(is_ready_to_move)
+    //     {
+    //         cmd.pos = current_target_cart_pos_;
+    //     }
+    //     else
+    //     {
+    //         std::array<double, 16> current_pos {};
+    //         robot_.getStateData(RtSupportedFields::tcpPose_m, current_pos);
+    //         cmd.pos = current_pos;
+    //     }
+    //     return cmd;
+    // }
+
     CartesianPosition rokae_callback()
     {
-        bool is_ready_to_move = false;
-        std::array<double, 16> current_target_cart_pos_ {};
-        std::array<double, 16> last_target_cart_pos_;
+        CartesianPosition cmd;
+        // 使用临时变量，减少锁占用的时间
+        std::array<double, 16> target_pos;
+        bool from_queue = false;
+
         {
             std::lock_guard<std::mutex> lock(cart_positions_mutex_);
-            // if(!cart_queue_.empty()) 
-            // {
-            //     last_target_cart_pos_ = cart_queue_.front();
-            //     cart_queue_.pop_front();
-            // }
-            // //   constexpr const char *tcpPose_m  = "pos_m"; ///< 末端位姿, 相对于基坐标系, 行优先齐次变换矩阵 - Array16D
-            // else
-            // {
-            //     cmd.pos = last_target_cart_pos_;
-            // }
+            
             if(!cart_queue_.empty()) 
             {
-                current_target_cart_pos_ = cart_queue_.front();
+                // 1. 队列有数据，取出新数据并更新“最后有效位置”
+                target_pos = cart_queue_.front();
                 cart_queue_.pop_front();
+                last_valid_cart_pos_ = target_pos; 
+                from_queue = true; // 标记数据来自队列
             }
-            //   constexpr const char *tcpPose_m  = "pos_m"; ///< 末端位姿, 相对于基坐标系, 行优先齐次变换矩阵 - Array16D
             else
             {
-                robot_.getStateData(RtSupportedFields::tcpPose_m, current_target_cart_pos_);
+                // 2. 队列为空，直接发送“最后一次有效的位置”
+                // 这保证了如果没有新话题，机械臂会稳稳地停在原地，不会有任何跳变
+                target_pos = last_valid_cart_pos_;
+                from_queue = false; // 标记数据来自上一帧备份
             }
+        }
 
-            if(!init_cart_pos_set_ && init_move_completed) 
-            {
-                init_cart_pos_set_ = true;
+    // --- 调试打印开始 ---
+        static int print_count = 0;
+        if (print_count++ % 500 == 0) // 每 500 次循环（约 0.5 秒）打印一次
+        {
+            if (from_queue) {
+                printf("[Real-Time] Data from QUEUE. Target Z: %.4f\n", target_pos[11]);
+            } else {
+                printf("[Real-Time] Queue EMPTY. Holding Z: %.4f\n", target_pos[11]);
             }
-            is_ready_to_move = init_cart_pos_set_ ;
+            
+            // 如果想看完整矩阵（可选）
+            /*
+            printf("Matrix: [%.3f, %.3f, %.3f, %.3f | ... | %.3f]\n", 
+                    target_pos[0], target_pos[1], target_pos[2], target_pos[3], target_pos[15]);
+            */
         }
+        // --- 调试打印结束 ---
 
-        CartesianPosition cmd;
-
-        // std::cout << init_joint_pos_set_<< std::endl;
-        if(is_ready_to_move)
-        {
-            cmd.pos = current_target_cart_pos_;
-        }
-        else
-        {
-            std::array<double, 16> current_pos {};
-            robot_.getStateData(RtSupportedFields::tcpPose_m, current_pos);
-            cmd.pos = current_pos;
-        }
+        // 赋值给 SDK 结构体
+        cmd.pos = target_pos;
+        // static double offset = 0;
+        // offset += 0.0001; // 每毫秒移动 0.1mm
+        // cmd.pos[11] += offset; // 在 Z 轴上做简易漂移
         return cmd;
     }
-
 
 
     int kbhit(void)
@@ -349,81 +406,123 @@ private:
                         break;
                     case 'c':
                         if (!control_loop_started_) 
-                        {
+                        // {
 
+                        //     std::array<double, 16> cur_pos {};
+                        //     robot_.getStateData(RtSupportedFields::tcpPose_m, cur_pos);
+                        //     std::cout << "Current positions: ";
+                        //     for (double value : cur_pos) {
+                        //         std::cout << value << " ";
+                        //     }
+                        //     // rokae::CartesianPosition start_cmd(cur_pos);
+
+                        //     std::array<double, 16> target_pos {};
+                        //     {
+                        //         std::lock_guard<std::mutex> lock(cart_positions_mutex_);
+                        //         target_pos = cart_queue_.empty() ? cur_pos : cart_queue_.front();
+                        //         // cart_queue_.clear();
+                        //     }
+                        //     std::cout << "Target positions: ";
+                        //     for (double value : target_pos) {
+                        //         std::cout << value << " ";
+                        //     }
+                        //     // rokae::CartesianPosition target_cmd(target_pos);
+
+                        //     // 3. 创建 CartesianPosition 对象（关键修复）
+                        //     rokae::CartesianPosition start_cmd;
+                        //     rokae::CartesianPosition target_cmd;
+                            
+                        //     // 方法1：直接赋值 pos 数组（推荐，避免构造函数 bug）
+                        //     start_cmd.pos = cur_pos;
+                        //     target_cmd.pos = target_pos;
+
+                        //     std::cout << std::endl;
+                        //     // motion_controller_->MoveL(0.5, start_cmd, target_cmd);
+
+                        //     {
+                        //         std::lock_guard<std::mutex> lock(cart_positions_mutex_);
+                        //         init_move_completed = true;
+                        //     }
+                        //     motion_controller_->setControlLoop(
+                        //         std::function<CartesianPosition()>(std::bind(&rt_RobotCtrlNode::rokae_callback, this)),
+                        //         0,
+                        //         true
+                        //     );
+                        //     motion_controller_->startMove(RtControllerMode::cartesianPosition);
+                        //     RCLCPP_INFO(this->get_logger(), "Control loop started.");
+                        //     control_thread_ = std::thread([this]() 
+                        //     {
+                        //         // try 
+                        //         // {
+                        //         //     this->motion_controller_->startLoop(true);
+                        //         // } catch (const std::exception& e) 
+                        //         // {
+                        //         //     RCLCPP_ERROR(this->get_logger(), "startLoop exception: %s", e.what());
+                        //         // }
+
+                        //         try {
+                        //             {
+                        //                 std::lock_guard<std::mutex> lock(cart_positions_mutex_);
+                        //                 if (cart_queue_.empty()) {
+                        //                     RCLCPP_INFO(this->get_logger(), "cart_queue_ is empty before starting real-time control loop");
+                        //                 } else {
+                        //                     RCLCPP_INFO(this->get_logger(), "cart_queue_ is not empty, size: %zu", cart_queue_.size());
+                        //                     // 可选：打印第一个点
+                        //                     const auto& front_point = cart_queue_.front();
+                        //                     RCLCPP_INFO(this->get_logger(), "First point in joint_queue_: [%f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f]",
+                        //                                 front_point[0], front_point[1], front_point[2], front_point[3],
+                        //                                 front_point[4], front_point[5], front_point[6], front_point[7], 
+                        //                                 front_point[8], front_point[9], front_point[10], front_point[11], 
+                        //                                 front_point[12], front_point[13], front_point[14], front_point[15]);
+                        //                 }
+                        //             }
+                                        
+                        //             RCLCPP_INFO(this->get_logger(), "Starting real-time control loop");
+                        //             this->motion_controller_->startLoop(true);
+                        //             } catch (const std::exception& e) {
+                        //                 RCLCPP_ERROR(this->get_logger(), "startLoop exception: %s", e.what());
+                        //                 rclcpp::shutdown();
+                        //             }
+
+                        //     });
+                        //     control_loop_started_ = true;
+                        // }
+                        {
+                            // 1. 启动前，先获取当前的真实物理位置
                             std::array<double, 16> cur_pos {};
                             robot_.getStateData(RtSupportedFields::tcpPose_m, cur_pos);
-                            std::cout << "Current positions: ";
-                            for (double value : cur_pos) {
-                                std::cout << value << " ";
-                            }
-                            // rokae::CartesianPosition start_cmd(cur_pos);
 
-                            std::array<double, 16> target_pos {};
+                            // 2. 关键：初始化 last_valid_cart_pos_ 并清空旧队列
                             {
                                 std::lock_guard<std::mutex> lock(cart_positions_mutex_);
-                                target_pos = cart_queue_.empty() ? cur_pos : cart_queue_.front();
-                                // cart_queue_.clear();
-                            }
-                            std::cout << "Target positions: ";
-                            for (double value : target_pos) {
-                                std::cout << value << " ";
-                            }
-                            // rokae::CartesianPosition target_cmd(target_pos);
-
-                            // 3. 创建 CartesianPosition 对象（关键修复）
-                            rokae::CartesianPosition start_cmd;
-                            rokae::CartesianPosition target_cmd;
-                            
-                            // 方法1：直接赋值 pos 数组（推荐，避免构造函数 bug）
-                            start_cmd.pos = cur_pos;
-                            target_cmd.pos = target_pos;
-
-                            std::cout << std::endl;
-                            // motion_controller_->MoveL(0.5, start_cmd, target_cmd);
-
-                            {
-                                std::lock_guard<std::mutex> lock(cart_positions_mutex_);
+                                last_valid_cart_pos_ = cur_pos; // 保证 callback 启动第一帧发出的就是当前位置
+                                while(!cart_queue_.empty()) cart_queue_.pop_front(); // 清空启动前积压的过时话题
                                 init_move_completed = true;
                             }
+
+                            std::cout << "Starting Control loop. Initial Z: " << cur_pos[11] << std::endl;
+
+                            // 3. 配置回调和模式
                             motion_controller_->setControlLoop(
                                 std::function<CartesianPosition()>(std::bind(&rt_RobotCtrlNode::rokae_callback, this)),
                                 0,
                                 true
                             );
                             motion_controller_->startMove(RtControllerMode::cartesianPosition);
-                            RCLCPP_INFO(this->get_logger(), "Control loop started.");
+                            
+                            RCLCPP_INFO(this->get_logger(), "Control mode enabled.");
+
+                            // 4. 启动实时线程
                             control_thread_ = std::thread([this]() 
                             {
-                                // try 
-                                // {
-                                //     this->motion_controller_->startLoop(true);
-                                // } catch (const std::exception& e) 
-                                // {
-                                //     RCLCPP_ERROR(this->get_logger(), "startLoop exception: %s", e.what());
-                                // }
-
                                 try {
-                                        std::lock_guard<std::mutex> lock(cart_positions_mutex_);
-                                        if (cart_queue_.empty()) {
-                                            RCLCPP_INFO(this->get_logger(), "cart_queue_ is empty before starting real-time control loop");
-                                        } else {
-                                            RCLCPP_INFO(this->get_logger(), "cart_queue_ is not empty, size: %zu", cart_queue_.size());
-                                            // 可选：打印第一个点
-                                            const auto& front_point = cart_queue_.front();
-                                            RCLCPP_INFO(this->get_logger(), "First point in joint_queue_: [%f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f, %f]",
-                                                        front_point[0], front_point[1], front_point[2], front_point[3],
-                                                        front_point[4], front_point[5], front_point[6], front_point[7], 
-                                                        front_point[8], front_point[9], front_point[10], front_point[11], 
-                                                        front_point[12], front_point[13], front_point[14], front_point[15]);
-                                        }
-                                        RCLCPP_INFO(this->get_logger(), "Starting real-time control loop");
-                                        this->motion_controller_->startLoop(true);
-                                    } catch (const std::exception& e) {
-                                        RCLCPP_ERROR(this->get_logger(), "startLoop exception: %s", e.what());
-                                        rclcpp::shutdown();
-                                    }
-
+                                    // 注意：这里已经没有锁了，确保 startLoop 不被锁卡死
+                                    RCLCPP_INFO(this->get_logger(), "Entering startLoop...");
+                                    this->motion_controller_->startLoop(true);
+                                } catch (const std::exception& e) {
+                                    RCLCPP_ERROR(this->get_logger(), "startLoop exception: %s", e.what());
+                                    rclcpp::shutdown();
+                                }
                             });
                             control_loop_started_ = true;
                         }
