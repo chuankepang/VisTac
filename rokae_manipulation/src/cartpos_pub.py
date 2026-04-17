@@ -20,7 +20,7 @@ class CartTrajectoryPublisher(Node):
         # 基础平移 (基于你日志里的起点)
         base_x = 0.5635
         base_y = 0.0000
-        base_z = 0.4314  
+        base_z = 0.4306
         
         # 在 Z 轴上叠加一个振幅为 5cm (0.05m) 的正弦波
         # math.sin(self.time_elapsed) 频率大约为 0.16 Hz

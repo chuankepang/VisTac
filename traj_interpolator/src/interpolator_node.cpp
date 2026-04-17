@@ -43,7 +43,7 @@ public:
 
         // --- 4. 发布器与定时器 ---
         smooth_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>("/target_cartpos", 10);
-        timer_ = this->create_wall_timer(std::chrono::milliseconds(2), std::bind(&TrajInterpolator::updateLoop, this));
+        timer_ = this->create_wall_timer(std::chrono::milliseconds(1), std::bind(&TrajInterpolator::updateLoop, this));
 
         // 初始状态设定
         current_mode_ = CommandSource::IDLE; 
@@ -169,8 +169,8 @@ private:
     Eigen::Quaterniond current_quat_, target_quat_;
 
     // 插值限制参数 (决定机械臂最高速度)
-    const double max_linear_step_ = 0.0004; // 2ms走0.4mm -> ~0.2 m/s
-    const double max_angular_step_ = 0.002; // 2ms转0.002rad -> ~57.3 deg/s
+    const double max_linear_step_ = 0.0002; // 2ms走0.4mm -> ~0.2 m/s
+    const double max_angular_step_ = 0.001; // 2ms转0.002rad -> ~57.3 deg/s
 };
 
 int main(int argc, char** argv) {

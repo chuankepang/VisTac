@@ -86,4 +86,29 @@ install(TARGETS
   DESTINATION lib/${PROJECT_NAME}
 )
 
+add_executable(rokae_vision
+  src/rokae_vision.cpp
+)
+
+target_link_libraries(rokae_vision
+  Rokae::Rokae
+  Eigen3::Eigen
+)
+
+
+target_include_directories(rokae_vision PRIVATE
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+ament_target_dependencies(rokae_vision
+  rclcpp
+  std_msgs
+)
+
+install(TARGETS
+  rokae_vision
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 ament_package()
