@@ -2,32 +2,41 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
 import math
+import time
 
 class CartTrajectoryPublisher(Node):
     def __init__(self):
         super().__init__('cart_test_pub')
-        # 发布到你的话题
         self.publisher_ = self.create_publisher(Float32MultiArray, 'target_cartpos', 10)
-        # 以 100Hz 的频率发布 (0.01s)
-        self.timer = self.create_timer(0.001, self.timer_callback)
-        self.time_elapsed = 0.0
-
-        self.get_logger().info("Starting smooth trajectory publisher (Sine wave on Z-axis)...")
+        
+        # --- 模拟参数设置 ---
+        self.inference_hz = 50.0  # 推理频率 5Hz
+        self.timer_period = 1.0 / self.inference_hz
+        
+        # 创建定时器
+        self.timer = self.create_timer(self.timer_period, self.timer_callback)
+        
+        self.start_time = time.time()
+        self.get_logger().info(f"Simulating 5Hz inference policy...")
 
     def timer_callback(self):
         msg = Float32MultiArray()
         
-        # 基础平移 (基于你日志里的起点)
+        # 获取真实经过的时间
+        elapsed = time.time() - self.start_time
+        
+        # 基础位姿 (与机器人当前位置对应的起始点)
         base_x = 0.5635
         base_y = 0.0000
         base_z = 0.4306
         
-        # 在 Z 轴上叠加一个振幅为 5cm (0.05m) 的正弦波
-        # math.sin(self.time_elapsed) 频率大约为 0.16 Hz
-        z_offset = 0.05 * math.sin(self.time_elapsed) 
+        # 轨迹方程：在 Z 轴做正弦往复
+        # 周期为 4秒 (0.25Hz), 振幅 5cm
+        z_offset = 0.05 * math.sin(2 * math.pi * 0.25 * elapsed) 
         target_z = base_z + z_offset
 
-        # 构造严格的 4x4 齐次变换矩阵 (行优先，16个元素)
+        # 构造 4x4 齐次变换矩阵 (RowMajor)
+        # 注意：这里模拟的是推理出的目标点，每 0.2s 才发布一次
         msg.data = [
             -1.0,  0.0,  0.0,  base_x,
              0.0,  1.0,  0.0,  base_y,
@@ -36,7 +45,7 @@ class CartTrajectoryPublisher(Node):
         ]
         
         self.publisher_.publish(msg)
-        self.time_elapsed += 0.001  # 每次增加 0.01 秒
+        # self.get_logger().info(f"Publishing target z: {target_z:.4f}")
 
 def main(args=None):
     rclpy.init(args=args)
