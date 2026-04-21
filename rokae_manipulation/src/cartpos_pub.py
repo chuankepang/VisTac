@@ -10,7 +10,7 @@ class CartTrajectoryPublisher(Node):
         self.publisher_ = self.create_publisher(Float32MultiArray, 'target_cartpos', 10)
         
         # --- 模拟参数设置 ---
-        self.inference_hz = 50.0  # 推理频率 5Hz
+        self.inference_hz = 100.0  # 推理频率 5Hz
         self.timer_period = 1.0 / self.inference_hz
         
         # 创建定时器
