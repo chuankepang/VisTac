@@ -118,27 +118,133 @@ private:
     // 微观机械臂状态 (在 1kHz 循环中实时流转)
     Eigen::Vector3d curr_p_, curr_v_p_;
     Eigen::Quaterniond curr_q_;
-    Eigen::Vector3d curr_omega_;          
+    Eigen::Vector3d curr_omega_;
+    
+    // 手眼标定矩阵：从法兰盘(Flange)到相机(Camera)的变换
+    // 固定不变，在构造函数或 init 中初始化
+    Eigen::Matrix4d flange_T_camera_;
 
-    // --- 回调函数 1：模型指令接收 (低频 5Hz) ---
+    // ... 其他变量 ...
+    Eigen::Matrix4d latest_camera_T_object_ = Eigen::Matrix4d::Identity();
+    bool vision_received_ = false; // 标记是否收到过视觉数据
+    std::mutex vision_data_mutex_; // 专门保护视觉原始数据的锁
+
+    /**
+    * @brief 计算物体在基坐标系下的位姿 (base_T_object)
+    * @param raw_flange_pose 机械臂实时反馈的 16 维数组 (RowMajor)
+    * @param cam_T_obj 视觉系统输出的目标位姿 (Eigen 形式)
+    * @return Eigen::Matrix4d 转换后的基座坐标系位姿
+    */
+    Eigen::Matrix4d computeTargetInBase(const std::array<double, 16>& raw_flange_pose, 
+                                        const Eigen::Matrix4d& cam_T_obj) 
+    {
+        // 1. 将机械臂返回的数组映射为 Eigen 矩阵 (base_T_flange)
+        // Rokae 的 tcpPose_m 通常是 RowMajor 存储的 4x4 齐次矩阵
+        Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::RowMajor>> base_T_flange(raw_flange_pose.data());
+
+        // 2. 执行链式相乘: T_base_obj = T_base_flange * T_flange_cam * T_cam_obj
+        Eigen::Matrix4d base_T_object = base_T_flange * flange_T_camera_ * cam_T_obj;
+
+        // 3. 数值稳定性处理：强制正交化旋转矩阵部分
+        // 经过多次矩阵乘法，旋转部分可能不再是严格的单位正交阵，这会导致底层控制器报错
+        Eigen::Matrix3d R = base_T_object.block<3, 3>(0, 0);
+        Eigen::Quaterniond q(R);
+        q.normalize(); // 归一化四元数
+        base_T_object.block<3, 3>(0, 0) = q.toRotationMatrix();
+
+        return base_T_object;
+    }
+
+    /**
+     * @brief 将 Eigen 4x4 齐次变换矩阵转为 Rokae 的 CartesianPosition
+     */
+    rokae::CartesianPosition matrixToCartPos(const Eigen::Matrix4d& mat) {
+        rokae::CartesianPosition cp;
+        
+        // 1. 提取平移部分 (X, Y, Z)，Rokae 单位是米 (m)
+        // Frame 类内部有 trans 成员
+        cp.trans = { mat(0, 3), mat(1, 3), mat(2, 3) };
+        
+        // 2. 提取旋转部分并转换为欧拉角 RPY (Roll, Pitch, Yaw)
+        // Rokae 的 RPY 通常对应绕 X-Y-Z 轴的旋转，单位是弧度 (rad)
+        // Eigen 的 eulerAngles(0, 1, 2) 提取顺序即为 X-Y-Z
+        Eigen::Vector3d euler = mat.block<3, 3>(0, 0).eulerAngles(0, 1, 2);
+        cp.rpy = { euler[0], euler[1], euler[2] };
+        
+        // （可选）如果你的机械臂是 7 轴的，可能需要配置 elbow 或 confData
+        // cp.hasElbow = false; 
+
+        return cp;
+    }
+
+    // // --- 回调函数 1：模型指令接收 (低频 5Hz) ---
+    // void cartPositionCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
+    // {
+    //     if (msg->data.size() == 16) {
+    //         Eigen::Map<const Eigen::Matrix<float, 4, 4, Eigen::RowMajor>> f_mat(msg->data.data());
+    //         Eigen::Matrix4d d_mat = f_mat.cast<double>();
+            
+    //         Eigen::Vector3d new_p = d_mat.block<3, 1>(0, 3);
+    //         Eigen::Quaterniond new_q = Eigen::Quaterniond(d_mat.block<3, 3>(0, 0));
+    //         new_q.normalize();
+
+    //         std::lock_guard<std::mutex> lock(target_mutex_);
+            
+    //         // 核心灵魂：强行从当前的“微观滤波位置”作为新周期的起点
+    //         // 无论上一个动作有没有完成，无论网络丢了多少帧，全盘接纳当前状态！
+    //         start_p_ = curr_p_;
+    //         start_q_ = curr_q_;
+            
+    //         end_p_ = new_p;
+    //         end_q_ = new_q;
+            
+    //         // 四元数防绕远路处理
+    //         if (start_q_.dot(end_q_) < 0.0) {
+    //             end_q_.coeffs() *= -1.0;
+    //         }
+            
+    //         // 刷新时间戳
+    //         start_time_ = std::chrono::steady_clock::now();
+    //         end_time_ = start_time_ + interp_duration_;
+    //     }
+    // }
+
     void cartPositionCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
     {
         if (msg->data.size() == 16) {
+            // 1. 将收到的 Float32MultiArray 映射为相机坐标系下的目标位姿 camera_T_object
             Eigen::Map<const Eigen::Matrix<float, 4, 4, Eigen::RowMajor>> f_mat(msg->data.data());
-            Eigen::Matrix4d d_mat = f_mat.cast<double>();
-            
-            Eigen::Vector3d new_p = d_mat.block<3, 1>(0, 3);
-            Eigen::Quaterniond new_q = Eigen::Quaterniond(d_mat.block<3, 3>(0, 0));
+            Eigen::Matrix4d cam_T_obj = f_mat.cast<double>();
+
+            // 【新增】保存一份原始视觉快照，供离线阶段（keyboard_thread）的 TODO 使用
+            {
+                std::lock_guard<std::mutex> lock(vision_data_mutex_); // 建议新增一个锁专门护航原始数据
+                latest_camera_T_object_ = cam_T_obj;
+                vision_received_ = true;
+            }
+
+            // 2. 获取当前这一时刻机械臂的真实位姿 (base_T_flange)
+            // 注意：这是实时闭环的关键，确保转换基于最新的机器人状态
+            std::array<double, 16> current_raw_flange;
+            robot_.getStateData(RtSupportedFields::tcpPose_m, current_raw_flange);
+
+            // 3. 调用我们写好的 Private 函数进行坐标系转换
+            // 计算公式：base_T_object = base_T_flange * flange_T_camera * camera_T_object
+            Eigen::Matrix4d target_in_base = computeTargetInBase(current_raw_flange, cam_T_obj);
+
+            // 4. 提取转换后的位置和姿态
+            Eigen::Vector3d new_p = target_in_base.block<3, 1>(0, 3);
+            Eigen::Quaterniond new_q = Eigen::Quaterniond(target_in_base.block<3, 3>(0, 0));
             new_q.normalize();
 
+            // 5. 进入原有的“灵魂”插值逻辑
             std::lock_guard<std::mutex> lock(target_mutex_);
             
-            // 核心灵魂：强行从当前的“微观滤波位置”作为新周期的起点
-            // 无论上一个动作有没有完成，无论网络丢了多少帧，全盘接纳当前状态！
+            // 强行从当前的“微观滤波位置”作为新周期的起点，接纳当前状态
             start_p_ = curr_p_;
             start_q_ = curr_q_;
             
-            end_p_ = new_p;
+            end_p_ = new_p; // 现在的 end_p_ 已经是 Base 坐标系下的绝对坐标了
             end_q_ = new_q;
             
             // 四元数防绕远路处理
@@ -230,10 +336,55 @@ private:
             if (kbhit()) {
                 char ch = getchar();
                 if (ch == 'c' && !control_loop_started_) {
+
+                    if (!vision_received_) {
+                            RCLCPP_WARN(this->get_logger(), "Waiting for vision data...");
+                            continue;
+                        }
+
+                    // 1. 获取最新视觉数据快照
+                    Eigen::Matrix4d snap_cam_T_obj;
+                    {
+                        std::lock_guard<std::mutex> lock(vision_data_mutex_);
+                        snap_cam_T_obj = latest_camera_T_object_;
+                    }
+
+                    // 1. 获取当前机械臂位姿
+                    std::array<double, 16> current_raw_pose;
+                    robot_.getStateData(RtSupportedFields::tcpPose_m, current_raw_pose);
+                    Eigen::Matrix4d target_in_base = computeTargetInBase(current_raw_pose, snap_cam_T_obj);
+
+                    // 3. 计算预抓取点 (相对于目标物体 Z 轴向上退 10cm)
+                    // 构造一个在物体本地坐标系下的偏移
+                    Eigen::Matrix4d T_offset = Eigen::Matrix4d::Identity();
+                    T_offset(2, 3) = -0.1; // 沿物体 Z 轴负方向(通常是垂直上方)移动 10cm
+
+                    // 预抓取位姿 = 物体位姿 * 偏移
+                    Eigen::Matrix4d pre_grasp_pose = target_in_base * T_offset;
+
+                    // 1. 提取当前的真实位姿矩阵（将 array16 转为 Eigen）
+                    Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::RowMajor>> current_mat(current_raw_pose.data());
+
+                    // 2. 使用我们的转换函数创建 Rokae 指令结构体
+                    rokae::CartesianPosition start_cmd = matrixToCartPos(current_mat);
+                    rokae::CartesianPosition target_cmd = matrixToCartPos(pre_grasp_pose);
+
+                    // --- 4. 执行 Phase 1：大范围阻塞式移动 ---
+                    RCLCPP_INFO(this->get_logger(), "Phase 1: Moving to pre-grasp point...");
+                    try {
+                        // speed 设置为 0.5 (50% 速度)
+                        // 此时传入的 start_cmd 和 target_cmd 都是标准的 CartesianPosition 格式
+                        motion_controller_->MoveL(0.5, start_cmd, target_cmd); 
+                    } catch (const std::exception& e) {
+                        RCLCPP_ERROR(this->get_logger(), "Phase 1 Motion failed: %s", e.what());
+                        continue; // 运动失败则不进入 Phase 2，继续等待下一次 'c'
+                    }
+
+                    RCLCPP_INFO(this->get_logger(), "Phase 1 Complete. Ready for RT Servoing.");
+
                     std::array<double, 16> init_cart {};
                     robot_.getStateData(RtSupportedFields::tcpPose_m, init_cart);
                     Eigen::Map<const Eigen::Matrix<double, 4, 4, Eigen::RowMajor>> mat(init_cart.data());
-                    
                     {
                         std::lock_guard<std::mutex> lock(target_mutex_);
                         // 初始化微观状态
