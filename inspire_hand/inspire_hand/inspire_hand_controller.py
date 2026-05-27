@@ -3,9 +3,12 @@
 灵巧手独立控制节点
 支持：捏取、释放、预定义动作、扩展动作库
 """
-
+'''
 # ros2 topic pub --once /hand_action std_msgs/msg/String "{data: 'pinch'}"
-
+'''
+...
+小拇指、无名指、中指、食指、大拇指弯曲、大拇指偏移
+...
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Int32MultiArray, String
@@ -61,6 +64,9 @@ class InspireHandController(Node):
             'victory':   [0, 0, 1000, 1000, 0, 0],    # 胜利手势
             'point':     [0, 0, 1000, 0, 0, 0],      # 指点手势
             'ok':        [0, 0, 0, 1000, 500, 500],  # OK手势
+
+            'connector_close': [1000, 1000, 550, 550, 500, 0],
+            'connector_open': [1000, 1000, 1000, 1000, 1000, 1000],
         }
         
         # 动作参数（可配置）
